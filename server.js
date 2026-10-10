@@ -29,17 +29,25 @@ const User = mongoose.model('User', new mongoose.Schema({
 const messageSchema = new mongoose.Schema({
   from: { type: String, required: true, index: true },
   to: { type: String, required: true, index: true },
-  text: { type: String, required: true, maxlength: 2000 },
+  text: { type: String, default: '', maxlength: 2000 },
+  kind: { type: String, enum: ['text', 'image'], default: 'text' },
+  imageData: { type: Buffer, select: false },
+  deletedForAll: { type: Boolean, default: false },
+  hiddenFor: { type: [String], default: [] },
+  replyTo: { id: String, from: String, text: String, kind: String },
   status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
   createdAt: { type: Date, default: Date.now },
 });
 messageSchema.index({ from: 1, to: 1, createdAt: 1 });
 const Message = mongoose.model('Message', messageSchema);
 
-const ser = (m) => ({
-  id: String(m._id), from: m.from, to: m.to, text: m.text,
-  status: m.status, createdAt: m.createdAt,
-});
+const ser = (m) => {
+  const base = { id: String(m._id), from: m.from, to: m.to, status: m.status, createdAt: m.createdAt };
+  if (m.deletedForAll) return { ...base, text: '', kind: 'text', deleted: true, replyTo: null };
+  const r = m.replyTo && m.replyTo.id
+    ? { id: m.replyTo.id, from: m.replyTo.from, text: m.replyTo.text, kind: m.replyTo.kind } : null;
+  return { ...base, text: m.text, kind: m.kind || 'text', deleted: false, replyTo: r };
+};
 
 /* ---------- Helpers ---------- */
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -74,7 +82,7 @@ app.use(helmet({
       styleSrc: ["'self'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
@@ -137,13 +145,13 @@ app.get('/api/users/search', auth, async (req, res) => {
 
 app.get('/api/conversations', auth, async (req, res) => {
   const me = req.user;
-  const msgs = await Message.find({ $or: [{ from: me }, { to: me }] })
+  const msgs = await Message.find({ $or: [{ from: me }, { to: me }], hiddenFor: { $ne: me } })
     .sort({ createdAt: -1 }).limit(1000).lean();
   const map = new Map();
   for (const m of msgs) {
     const peer = m.from === me ? m.to : m.from;
     if (!map.has(peer)) map.set(peer, { peer, last: ser(m), unread: 0 });
-    if (m.to === me && m.status !== 'read') map.get(peer).unread++;
+    if (m.to === me && m.status !== 'read' && !m.deletedForAll) map.get(peer).unread++;
   }
   const users = await User.find({ username: { $in: [...map.keys()] } }).lean();
   const seen = new Map(users.map((u) => [u.username, u.lastSeen]));
@@ -155,13 +163,24 @@ app.get('/api/messages/:peer', auth, async (req, res) => {
   const peer = String(req.params.peer).toLowerCase();
   const msgs = await Message.find({
     $or: [{ from: me, to: peer }, { from: peer, to: me }],
+    hiddenFor: { $ne: me },
   }).sort({ createdAt: -1 }).limit(200).lean();
   res.json(msgs.reverse().map(ser));
 });
 
+app.get('/api/images/:id', auth, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).end();
+  const m = await Message.findById(req.params.id).select('+imageData from to kind hiddenFor deletedForAll');
+  if (!m || m.kind !== 'image' || m.deletedForAll || m.hiddenFor.includes(req.user)
+      || (m.from !== req.user && m.to !== req.user)) return res.status(404).end();
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'private, max-age=86400');
+  res.send(m.imageData);
+});
+
 /* ---------- Real-time (Socket.IO) ---------- */
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 2e6 });
 const online = new Map(); // username -> Set(socket ids)
 
 io.use((socket, next) => {
@@ -205,10 +224,32 @@ io.on('connection', async (socket) => {
 
       const to = String((data && data.to) || '').toLowerCase();
       const text = String((data && data.text) || '').trim();
-      if (!text || text.length > 2000 || to === me) return reply({ error: 'Invalid message' });
+      const rawImage = data && typeof data.image === 'string' ? data.image : '';
+      let imageData = null;
+      if (rawImage) {
+        const prefix = 'data:image/jpeg;base64,';
+        if (!rawImage.startsWith(prefix) || rawImage.length > 1700000) return reply({ error: 'Photo is too large' });
+        imageData = Buffer.from(rawImage.slice(prefix.length), 'base64');
+        if (imageData.length < 100 || imageData[0] !== 0xff || imageData[1] !== 0xd8) {
+          return reply({ error: 'Invalid photo' });
+        }
+      }
+      if ((!text && !imageData) || text.length > 2000 || to === me) return reply({ error: 'Invalid message' });
       if (!(await User.exists({ username: to }))) return reply({ error: 'User not found' });
 
-      const m = await Message.create({ from: me, to, text, status: online.has(to) ? 'delivered' : 'sent' });
+      let replyTo;
+      const rid = data && data.replyTo;
+      if (rid && mongoose.isValidObjectId(rid)) {
+        const r = await Message.findById(rid).select('from to text kind deletedForAll').lean();
+        if (r && !r.deletedForAll && [r.from, r.to].includes(me) && [r.from, r.to].includes(to)) {
+          replyTo = { id: String(r._id), from: r.from, kind: r.kind, text: String(r.text || '').slice(0, 100) };
+        }
+      }
+
+      const m = await Message.create({
+        from: me, to, text, kind: imageData ? 'image' : 'text', imageData, replyTo,
+        status: online.has(to) ? 'delivered' : 'sent',
+      });
       const out = ser(m);
       io.to('u:' + to).emit('message:new', out);
       socket.to('u:' + me).emit('message:new', out); // my other devices
@@ -216,6 +257,47 @@ io.on('connection', async (socket) => {
     } catch (e) {
       console.error(e);
       reply({ error: 'Could not send' });
+    }
+  });
+
+  socket.on('message:delete', async (d, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    try {
+      const id = d && d.id;
+      if (!mongoose.isValidObjectId(id)) return reply({ error: 'Invalid message' });
+      const m = await Message.findOne({ _id: id, $or: [{ from: me }, { to: me }] }).lean();
+      if (!m) return reply({ error: 'Message not found' });
+      if (d.scope === 'all') {
+        if (m.from !== me) return reply({ error: 'You can delete only your own messages for everyone' });
+        await Message.updateOne({ _id: id }, {
+          $set: { deletedForAll: true, text: '', kind: 'text' },
+          $unset: { imageData: 1, replyTo: 1 },
+        });
+        io.to('u:' + m.from).to('u:' + m.to).emit('message:deleted', { id: String(id), from: m.from, to: m.to });
+      } else {
+        await Message.updateOne({ _id: id }, { $addToSet: { hiddenFor: me } });
+        io.to('u:' + me).emit('message:removed', { id: String(id) });
+      }
+      reply({ ok: true });
+    } catch (e) {
+      console.error(e);
+      reply({ error: 'Could not delete' });
+    }
+  });
+
+  socket.on('chat:clear', async (d, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    try {
+      const peer = String((d && d.peer) || '').toLowerCase();
+      if (!peer) return reply({ error: 'Invalid chat' });
+      await Message.updateMany(
+        { $or: [{ from: me, to: peer }, { from: peer, to: me }] },
+        { $addToSet: { hiddenFor: me } });
+      io.to('u:' + me).emit('chat:cleared', { peer });
+      reply({ ok: true });
+    } catch (e) {
+      console.error(e);
+      reply({ error: 'Could not delete chat' });
     }
   });
 

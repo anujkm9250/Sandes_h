@@ -61,9 +61,18 @@
             <strong id="peer-name"></strong>
             <span class="sub" id="peer-status"></span>
           </div>
+          <button id="clear-chat" type="button" class="ghost">Delete chat</button>
         </header>
         <div id="messages" aria-live="polite"></div>
+        <div id="emoji-panel" hidden></div>
+        <div id="reply-bar" hidden>
+          <div class="reply-text" id="reply-text"></div>
+          <button id="reply-cancel" type="button" class="icon-btn" aria-label="Cancel reply">✕</button>
+        </div>
         <form id="composer" autocomplete="off">
+          <button id="emoji-btn" type="button" class="icon-btn" aria-label="Emoji">🙂</button>
+          <button id="photo-btn" type="button" class="icon-btn" aria-label="Send photo">📷</button>
+          <input id="photo" type="file" accept="image/*" hidden>
           <input id="text" placeholder="Type a message" maxlength="2000" aria-label="Message">
           <button class="primary" type="submit">Send</button>
         </form>

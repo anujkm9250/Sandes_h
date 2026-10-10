@@ -8,6 +8,8 @@
     empty: $('#empty'), pane: $('#chat-pane'), back: $('#back'), peerName: $('#peer-name'),
     peerStatus: $('#peer-status'), peerAvatar: $('#peer-avatar'), messages: $('#messages'),
     composer: $('#composer'), text: $('#text'), toast: $('#toast'),
+    clearChat: $('#clear-chat'), replyBar: $('#reply-bar'), replyText: $('#reply-text'), replyCancel: $('#reply-cancel'),
+    photo: $('#photo'), photoBtn: $('#photo-btn'), emojiBtn: $('#emoji-btn'), emojiPanel: $('#emoji-panel'),
   };
 
   let token = localStorage.getItem('token');
@@ -116,6 +118,24 @@
       renderList(); updateHeader();
     });
     socket.on('message:new', onNewMessage);
+    socket.on('message:deleted', ({ id, from, to }) => {
+      const old = msgData.get(id);
+      if (old) replaceMsg({ ...old, text: '', kind: 'text', replyTo: null, deleted: true });
+      const c = convs.get(from === me ? to : from);
+      if (c && c.last && c.last.id === id) c.last = { ...c.last, text: '', kind: 'text', deleted: true };
+      renderList();
+    });
+    socket.on('message:removed', ({ id }) => {
+      msgData.delete(id);
+      const node = el.messages.querySelector('[data-id="' + id + '"]');
+      if (node) node.remove();
+      loadConversations();
+    });
+    socket.on('chat:cleared', ({ peer: p }) => {
+      convs.delete(p);
+      if (peer === p) { el.messages.replaceChildren(); msgData.clear(); }
+      renderList();
+    });
     socket.on('message:status', ({ ids, status }) => ids.forEach((id) => setTick(id, status)));
     socket.on('typing', ({ from, typing }) => {
       if (from !== peer) return;
@@ -130,6 +150,7 @@
   async function loadConversations() {
     try {
       const list = await api('/conversations');
+      convs.clear();
       list.forEach((c) => {
         convs.set(c.peer, { peer: c.peer, last: c.last, unread: peer === c.peer ? 0 : c.unread });
         if (c.lastSeen) lastSeen.set(c.peer, c.lastSeen);
@@ -165,7 +186,8 @@
     bottom.className = 'row-bottom';
     const pv = document.createElement('span');
     pv.className = 'row-preview';
-    pv.textContent = last ? (last.from === me ? 'You: ' : '') + last.text : 'Start a conversation';
+    const lastText = last ? (last.deleted ? 'This message was deleted' : last.kind === 'image' ? '\uD83D\uDCF7 Photo' + (last.text ? ' ' + last.text : '') : last.text) : '';
+    pv.textContent = last ? (last.from === me ? 'You: ' : '') + lastText : 'Start a conversation';
     bottom.appendChild(pv);
     if (unread > 0) {
       const b = document.createElement('span');
@@ -178,7 +200,14 @@
     return li;
   }
 
+  function updateTitle() {
+    let n = 0;
+    convs.forEach((c) => { n += c.unread || 0; });
+    document.title = n ? '(' + n + ') Sandesh' : 'Sandesh';
+  }
+
   function renderList() {
+    updateTitle();
     el.list.replaceChildren();
     if (searchResults) {
       if (!searchResults.length) {
@@ -227,28 +256,135 @@
 
   function tickText(status) { return status === 'sent' ? '\u2713' : '\u2713\u2713'; }
 
-  function appendMsg(m) {
-    if (el.messages.querySelector('[data-id="' + m.id + '"]')) return;
+  const msgData = new Map();   // message id -> message object
+  let replyingTo = null;
+
+  const quoteText = (r) => (r.kind === 'image' ? '\uD83D\uDCF7 Photo' + (r.text ? ' ' + r.text : '') : r.text);
+
+  function buildMsg(m) {
+    msgData.set(m.id, m);
     const mine = m.from === me;
     const d = document.createElement('div');
-    d.className = 'msg' + (mine ? ' mine' : '');
+    d.className = 'msg' + (mine ? ' mine' : '') + (m.deleted ? ' deleted' : '');
     d.dataset.id = m.id;
-    d.append(document.createTextNode(m.text));
+    if (m.deleted) {
+      d.append(document.createTextNode('\uD83D\uDEAB This message was deleted'));
+    } else {
+      if (m.replyTo && m.replyTo.id) {
+        const q = document.createElement('div');
+        q.className = 'quote';
+        const who = document.createElement('b');
+        who.textContent = m.replyTo.from === me ? 'You' : m.replyTo.from;
+        const what = document.createElement('span');
+        what.textContent = quoteText(m.replyTo);
+        q.append(who, what);
+        q.onclick = () => jumpTo(m.replyTo.id);
+        d.appendChild(q);
+      }
+      if (m.kind === 'image') {
+        const img = document.createElement('img');
+        img.className = 'photo'; img.alt = 'Photo';
+        img.addEventListener('click', () => { if (img.src) window.open(img.src, '_blank'); });
+        d.appendChild(img);
+        if (m.localSrc) img.src = m.localSrc; else loadPhoto(img, m.id);
+        if (m.text) { const c = document.createElement('div'); c.textContent = m.text; d.appendChild(c); }
+      } else {
+        d.append(document.createTextNode(m.text));
+      }
+    }
     const meta = document.createElement('span');
     meta.className = 'meta';
     meta.append(document.createTextNode(fmtTime(m.createdAt)));
-    if (mine) {
+    if (mine && !m.deleted) {
       const t = document.createElement('span');
       t.className = 'tick ' + m.status;
       t.textContent = ' ' + tickText(m.status);
       meta.appendChild(t);
     }
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'more'; more.textContent = '\u22EF';
+    more.setAttribute('aria-label', 'Message options');
+    more.onclick = () => toggleActions(d, m.id);
+    meta.appendChild(more);
     d.appendChild(meta);
-    el.messages.appendChild(d);
+    return d;
+  }
+
+  function appendMsg(m) {
+    if (el.messages.querySelector('[data-id="' + m.id + '"]')) return;
+    el.messages.appendChild(buildMsg(m));
     el.messages.scrollTop = el.messages.scrollHeight;
   }
 
+  function replaceMsg(m) {
+    const old = el.messages.querySelector('[data-id="' + m.id + '"]');
+    if (old) old.replaceWith(buildMsg(m)); else msgData.set(m.id, m);
+  }
+
+  function toggleActions(node, id) {
+    const open = node.querySelector('.actions');
+    if (open) { open.remove(); return; }
+    const m = msgData.get(id);
+    if (!m) return;
+    const row = document.createElement('div');
+    row.className = 'actions';
+    const add = (label, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = label;
+      b.onclick = () => { row.remove(); fn(); };
+      row.appendChild(b);
+    };
+    if (!m.deleted) add('Reply', () => startReply(m));
+    if (!m.deleted && m.kind === 'text' && m.text) add('Copy', () => copyText(m.text));
+    add('Delete for me', () => deleteMsg(id, 'me'));
+    if (!m.deleted && m.from === me) add('Delete for everyone', () => deleteMsg(id, 'all'));
+    node.appendChild(row);
+  }
+
+  function copyText(text) {
+    if (!navigator.clipboard) { toast('Copy is not available here'); return; }
+    navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Could not copy'));
+  }
+
+  function deleteMsg(id, scope) {
+    if (!socket || !socket.connected) { toast('Connecting\u2026 try again in a moment'); return; }
+    socket.emit('message:delete', { id, scope }, (res) => { if (res && res.error) toast(res.error); });
+  }
+
+  function jumpTo(id) {
+    const node = el.messages.querySelector('[data-id="' + id + '"]');
+    if (!node) { toast('Original message is not loaded'); return; }
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    node.classList.add('flash');
+    setTimeout(() => node.classList.remove('flash'), 1200);
+  }
+
+  function startReply(m) {
+    replyingTo = m;
+    el.replyText.textContent = (m.from === me ? 'You' : m.from) + ': ' + quoteText(m);
+    el.replyBar.hidden = false;
+    el.text.focus();
+  }
+  function cancelReply() { replyingTo = null; el.replyBar.hidden = true; }
+  el.replyCancel.onclick = cancelReply;
+
+  el.clearChat.onclick = () => {
+    if (!peer) return;
+    if (!confirm('Delete this whole chat from your side? ' + peer + ' will still keep their copy.')) return;
+    socket.emit('chat:clear', { peer }, (res) => { if (res && res.error) toast(res.error); });
+  };
+
+  async function loadPhoto(img, id) {
+    try {
+      const res = await fetch('/api/images/' + id, { headers: { Authorization: 'Bearer ' + token } });
+      if (!res.ok) throw new Error('load failed');
+      img.src = URL.createObjectURL(await res.blob());
+    } catch (e) { img.alt = 'Photo could not be loaded'; }
+  }
+
   function setTick(id, status) {
+    const md = msgData.get(id);
+    if (md) md.status = status;
     const t = el.messages.querySelector('[data-id="' + id + '"] .tick');
     if (!t) return;
     t.className = 'tick ' + status;
@@ -260,6 +396,7 @@
       const msgs = await api('/messages/' + encodeURIComponent(p));
       if (p !== peer) return;
       el.messages.replaceChildren();
+      msgData.clear();
       msgs.forEach(appendMsg);
       if (msgs.some((m) => m.from === p && m.status !== 'read')) socket.emit('messages:read', { peer: p });
     } catch (e) { toast(e.message); }
@@ -275,6 +412,8 @@
     el.pane.hidden = false;
     el.app.classList.add('chat-open');
     el.messages.replaceChildren();
+    msgData.clear();
+    cancelReply();
     updateHeader();
     renderList();
     loadMessages(p);
@@ -302,21 +441,28 @@
     renderList();
   }
 
+  function sendPayload(payload, localSrc) {
+    if (!socket || !socket.connected) { toast('Connecting\u2026 try again in a moment'); return false; }
+    const to = peer;
+    const replyTo = replyingTo ? replyingTo.id : undefined;
+    cancelReply();
+    socket.emit('message:send', { to, replyTo, ...payload }, (res) => {
+      if (!res || res.error) { toast((res && res.error) || 'Could not send'); return; }
+      if (to === peer) appendMsg(localSrc ? { ...res.message, localSrc } : res.message);
+      const c = convs.get(to) || { peer: to, unread: 0 };
+      c.last = res.message;
+      convs.set(to, c);
+      renderList();
+    });
+    return true;
+  }
+
   el.composer.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = el.text.value.trim();
     if (!text || !peer) return;
-    if (!socket || !socket.connected) { toast('Connecting\u2026 try again in a moment'); return; }
-    socket.emit('message:send', { to: peer, text }, (res) => {
-      if (!res || res.error) { toast((res && res.error) || 'Could not send'); return; }
-      appendMsg(res.message);
-      const c = convs.get(peer) || { peer, unread: 0 };
-      c.last = res.message;
-      convs.set(peer, c);
-      renderList();
-    });
-    el.text.value = '';
-    stopTyping();
+    if (sendPayload({ text })) { el.text.value = ''; stopTyping(); }
+    closeEmoji();
   });
 
   function stopTyping() {
@@ -329,6 +475,63 @@
     clearTimeout(typingStop);
     typingStop = setTimeout(stopTyping, 1500);
   });
+
+  /* ---------- photos ---------- */
+  function compress(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        let max = 1280, q = 0.8;
+        for (let i = 0; i < 4; i++) {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.width * scale);
+          c.height = Math.round(img.height * scale);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          const data = c.toDataURL('image/jpeg', q);
+          if (data.length < 1600000) return resolve(data);
+          max = Math.round(max * 0.75); q -= 0.1;
+        }
+        reject(new Error('Photo is too large'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read this photo')); };
+      img.src = url;
+    });
+  }
+
+  el.photoBtn.onclick = () => { if (peer) el.photo.click(); };
+  el.photo.addEventListener('change', async () => {
+    const file = el.photo.files[0];
+    el.photo.value = '';
+    if (!file || !peer) return;
+    if (!file.type.startsWith('image/')) { toast('Please choose an image'); return; }
+    try {
+      toast('Sending photo\u2026');
+      const dataUrl = await compress(file);
+      const caption = el.text.value.trim();
+      if (sendPayload({ image: dataUrl, text: caption }, dataUrl)) { el.text.value = ''; stopTyping(); }
+    } catch (err) { toast(err.message); }
+  });
+
+  /* ---------- emoji ---------- */
+  const EMOJIS = ('😀 😁 😂 🤣 😊 😍 😘 😎 🤔 😅 😢 😭 😡 🥳 😴 🙏 ' +
+    '👍 👎 👏 🙌 💪 🔥 ❤️ 💔 🎉 ✨ 💯 ✅ ❌ 👋 🤝 🙈 ' +
+    '😉 😇 🥺 😜 🤗 😬 🙄 😮 😋 😌 😤 😱 👌 ✌️ 🍀 🎂').split(' ');
+  EMOJIS.forEach((ch) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = ch; b.setAttribute('aria-label', 'Insert ' + ch);
+    b.onclick = () => {
+      const i = el.text.selectionStart == null ? el.text.value.length : el.text.selectionStart;
+      const j = el.text.selectionEnd == null ? i : el.text.selectionEnd;
+      el.text.setRangeText(ch, i, j, 'end');
+      el.text.focus();
+    };
+    el.emojiPanel.appendChild(b);
+  });
+  function closeEmoji() { el.emojiPanel.hidden = true; }
+  el.emojiBtn.onclick = () => { el.emojiPanel.hidden = !el.emojiPanel.hidden; };
 
   /* ---------- boot ---------- */
   if (token && me) start();
