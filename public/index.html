@@ -1,84 +1,173 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="cyber">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f5e63">
+  <meta name="theme-color" content="#070b12">
   <title>Sandesh</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <!-- ================= AUTH ================= -->
   <main id="auth">
-    <form id="auth-form" autocomplete="on">
-      <h1>Sandesh</h1>
-      <p class="tagline">Private chat for you and your friends.</p>
-      <div class="tabs" role="tablist">
-        <button type="button" role="tab" id="tab-login" class="active" aria-selected="true">Log in</button>
-        <button type="button" role="tab" id="tab-signup" aria-selected="false">Sign up</button>
+    <section class="brand" aria-label="About Sandesh">
+      <div class="logo">
+        <svg class="logo-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path class="hex" d="M24 3l17 10v22L24 45 7 35V13z" fill="none" stroke="currentColor" stroke-width="2.4"/>
+          <path d="M15 19h18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H25l-5 4v-4h-5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" fill="currentColor"/>
+          <circle class="dot" cx="19" cy="25.5" r="1.7"/><circle class="dot" cx="24" cy="25.5" r="1.7"/><circle class="dot" cx="29" cy="25.5" r="1.7"/>
+        </svg>
+        <span class="wordmark">SANDESH</span>
       </div>
-      <label>Username
-        <input id="username" name="username" autocomplete="username" autocapitalize="none" required minlength="3" maxlength="20">
-      </label>
-      <label>Password
-        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8">
-      </label>
-      <label id="invite-row" hidden>Invite code
-        <input id="invite" name="invite" autocomplete="off">
-      </label>
-      <p id="auth-error" role="alert"></p>
-      <button class="primary" id="auth-submit" type="submit">Log in</button>
-    </form>
+      <h1>Messages at the speed of signal.</h1>
+      <p class="lead">A private chat network for your crew. Invite-only, real-time, and built like a machine.</p>
+      <ul class="specs">
+        <li><span>01</span> Real-time relay</li>
+        <li><span>02</span> Invite-only access</li>
+        <li><span>03</span> Photos, replies, read receipts</li>
+      </ul>
+      <div class="link-status"><i></i> LINK ESTABLISHED</div>
+    </section>
+
+    <section class="auth-side">
+      <form id="auth-form" autocomplete="on">
+        <h2 id="auth-title">ACCESS TERMINAL</h2>
+        <div class="tabs" id="auth-tabs" role="tablist">
+          <button type="button" role="tab" id="tab-login" class="active" aria-selected="true">Log in</button>
+          <button type="button" role="tab" id="tab-signup" aria-selected="false">Sign up</button>
+        </div>
+        <p id="gsetup-note" class="hint" hidden></p>
+        <label>Username
+          <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required minlength="3" maxlength="20">
+        </label>
+        <label id="pw-row">Password
+          <span class="pw-wrap">
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button type="button" id="pw-toggle" class="link" aria-label="Show password">SHOW</button>
+          </span>
+        </label>
+        <label id="invite-row" hidden>Invite code
+          <input id="invite" name="invite" autocomplete="off" spellcheck="false">
+        </label>
+        <p id="auth-error" role="alert"></p>
+        <button class="primary" id="auth-submit" type="submit">Log in</button>
+        <button type="button" id="forgot-link" class="link">Forgot password?</button>
+        <div id="forgot" class="note" hidden>
+          <strong>RECOVER ACCESS</strong>
+          <p>Signed up with Gmail? Use <b>Continue with Google</b> below, no password needed.</p>
+          <p>Otherwise ask the admin to reset your password. They will give you a temporary one. After logging in, change it in Settings.</p>
+        </div>
+        <div id="google-wrap" hidden>
+          <div class="or"><span>OR</span></div>
+          <div id="google-btn"></div>
+        </div>
+      </form>
+    </section>
   </main>
 
+  <!-- ================= APP ================= -->
   <div id="app" hidden>
     <aside id="side">
       <header class="side-head">
-        <div>
+        <svg class="logo-mark small" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M24 3l17 10v22L24 45 7 35V13z" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path d="M15 19h18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H25l-5 4v-4h-5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" fill="currentColor"/>
+        </svg>
+        <div class="who">
           <strong id="me-name"></strong>
-          <span class="sub">Signed in</span>
+          <span class="sub">ONLINE</span>
         </div>
-        <button id="logout" type="button" class="ghost">Log out</button>
+        <button id="admin-btn" type="button" class="ghost" hidden>ADMIN</button>
+        <button id="settings-btn" type="button" class="ghost" aria-label="Settings">SETTINGS</button>
       </header>
-      <input id="search" type="search" placeholder="Find a friend by username" autocomplete="off">
+      <div id="notif-bar" hidden>
+        <span>Get alerts when new messages arrive</span>
+        <button id="notif-enable" type="button" class="primary small">Enable</button>
+      </div>
+      <input id="search" type="search" placeholder="Search by exact username" autocomplete="off" aria-label="Search users">
       <ul id="list"></ul>
     </aside>
 
     <section id="chat">
       <div id="empty">
-        <h2>Pick a conversation</h2>
-        <p>Choose a chat on the left, or search for a friend's username to start a new one.</p>
+        <svg class="logo-mark big" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M24 3l17 10v22L24 45 7 35V13z" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M15 19h18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H25l-5 4v-4h-5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" fill="currentColor"/>
+        </svg>
+        <h2>NO CHANNEL OPEN</h2>
+        <p>Pick a conversation on the left, or search a friend's username to open a new channel.</p>
       </div>
       <div id="chat-pane" hidden>
         <header class="chat-head">
           <button id="back" type="button" class="ghost" aria-label="Back to chats">&larr;</button>
           <div class="avatar" id="peer-avatar"></div>
-          <div>
+          <div class="peer-info">
             <strong id="peer-name"></strong>
             <span class="sub" id="peer-status"></span>
           </div>
-          <button id="clear-chat" type="button" class="ghost">Delete chat</button>
+          <button id="rename-btn" type="button" class="ghost" title="Set a nickname only you can see">Nickname</button>
+          <button id="clear-chat" type="button" class="ghost danger-text">Delete chat</button>
         </header>
         <div id="messages" aria-live="polite"></div>
         <div id="emoji-panel" hidden></div>
         <div id="reply-bar" hidden>
           <div class="reply-text" id="reply-text"></div>
-          <button id="reply-cancel" type="button" class="icon-btn" aria-label="Cancel reply">✕</button>
+          <button id="reply-cancel" type="button" class="icon-btn" aria-label="Cancel reply">&#10005;</button>
         </div>
         <form id="composer" autocomplete="off">
-          <button id="emoji-btn" type="button" class="icon-btn" aria-label="Emoji">🙂</button>
-          <button id="photo-btn" type="button" class="icon-btn" aria-label="Send photo">📷</button>
+          <button id="emoji-btn" type="button" class="icon-btn" aria-label="Emoji">&#128578;</button>
+          <button id="photo-btn" type="button" class="icon-btn" aria-label="Send photo">&#128247;</button>
           <input id="photo" type="file" accept="image/*" hidden>
-          <input id="text" placeholder="Type a message" maxlength="2000" aria-label="Message">
+          <input id="text" placeholder="Transmit a message..." maxlength="2000" aria-label="Message">
           <button class="primary" type="submit">Send</button>
         </form>
       </div>
     </section>
   </div>
+
+  <!-- ================= SETTINGS ================= -->
+  <dialog id="settings" aria-labelledby="settings-title">
+    <header class="dlg-head"><h2 id="settings-title">SETTINGS</h2>
+      <button id="settings-close" type="button" class="icon-btn" aria-label="Close">&#10005;</button></header>
+    <section>
+      <h3>Theme</h3>
+      <div class="swatches">
+        <button type="button" class="swatch sw-cyber" data-theme="cyber" aria-pressed="true"><i></i>Cyber</button>
+        <button type="button" class="swatch sw-circuit" data-theme="circuit" aria-pressed="false"><i></i>Circuit</button>
+        <button type="button" class="swatch sw-plasma" data-theme="plasma" aria-pressed="false"><i></i>Plasma</button>
+        <button type="button" class="swatch sw-lab" data-theme="lab" aria-pressed="false"><i></i>Lab</button>
+      </div>
+    </section>
+    <section>
+      <h3>Notifications</h3>
+      <p id="notif-status" class="hint"></p>
+      <button id="notif-btn" type="button" class="primary small">Enable notifications</button>
+    </section>
+    <section id="pw-section">
+      <h3>Change password</h3>
+      <form id="pw-form" autocomplete="off">
+        <label id="cur-row">Current password<input id="cur-pw" type="password" autocomplete="current-password"></label>
+        <label>New password<input id="new-pw" type="password" autocomplete="new-password" required minlength="6"></label>
+        <p id="pw-msg" class="hint" role="status"></p>
+        <button class="primary small" type="submit">Update password</button>
+      </form>
+    </section>
+    <section><button id="logout" type="button" class="danger">Log out</button></section>
+  </dialog>
+
+  <!-- ================= ADMIN ================= -->
+  <dialog id="admin" class="wide" aria-labelledby="admin-title">
+    <header class="dlg-head"><h2 id="admin-title">ADMIN CONSOLE</h2>
+      <button id="admin-close" type="button" class="icon-btn" aria-label="Close">&#10005;</button></header>
+    <p class="hint">Reset a forgotten password or delete an account (this also deletes that user's messages).</p>
+    <ul id="admin-list"></ul>
+  </dialog>
 
   <div id="toast" role="status"></div>
   <script src="/socket.io/socket.io.js"></script>
